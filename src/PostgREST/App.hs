@@ -62,6 +62,7 @@ import           PostgREST.QueryBuilder ( callProc
                                         , createReadStatement
                                         , createWriteStatement
                                         , ResultsWithCount
+                                        , returningF
                                         )
 import           PostgREST.Types
 import           PostgREST.OpenAPI
@@ -262,8 +263,9 @@ app dbStructure conf apiRequest =
       mapSnd f (a, b) = (a, f b)
       readDbRequest = DbRead <$> readRequest (configMaxRows conf) (dbRelations dbStructure) (map (mapSnd pdReturnType) $ dbProcs dbStructure) apiRequest
       mutateDbRequest = DbMutate <$> mutateRequest apiRequest
-      selectQuery = requestToQuery schema False <$> readDbRequest
-      mutateQuery = requestToQuery schema False <$> mutateDbRequest
+      returningSql = returningF (iTarget apiRequest) (iPreferRepresentation apiRequest) <$> readDbRequest
+      selectQuery = requestToQuery schema False "" <$> readDbRequest
+      mutateQuery = requestToQuery schema False <$> returningSql <*> mutateDbRequest
       countQuery = requestToCountQuery schema <$> readDbRequest
       readSqlParts = (,) <$> selectQuery <*> countQuery
       mutateSqlParts = (,) <$> selectQuery <*> mutateQuery
@@ -287,6 +289,7 @@ responseContentTypeOrError accepts action = serves contentTypesForRequest accept
           Left $ errResponse status415 $
             "None of these Content-Types are available: " <> failed
         Just ct -> Right ct
+
 
 splitKeyValue :: BS.ByteString -> (BS.ByteString, BS.ByteString)
 splitKeyValue kv = (k, BS.tail v)
@@ -315,10 +318,6 @@ contentRangeH lower upper total =
       totalNotZero  = fromMaybe True ((/=) 0 <$> total)
       fromInRange   = lower <= upper
 
-formatRelationError :: Text -> Text
-formatRelationError = formatGeneralError
-  "could not find foreign keys between these entities"
-
 formatParserError :: ParseError -> Text
 formatParserError e = formatGeneralError message details
   where
@@ -327,14 +326,15 @@ formatParserError e = formatGeneralError message details
        $ showErrorMessages "or" "unknown parse error" "expecting" "unexpected" "end of input" (errorMessages e)
 
 formatGeneralError :: Text -> Text -> Text
-formatGeneralError message details = toS $ encode $ object [
-  "message" .= message,
-  "details" .= details]
+formatGeneralError message details = message <> ", " <> details
 
 augumentRequestWithJoin :: Schema ->  [Relation] ->  ReadRequest -> Either Text ReadRequest
 augumentRequestWithJoin schema allRels request =
   (first formatRelationError . addRelations schema allRels Nothing) request
   >>= addJoinConditions schema
+  where
+    formatRelationError = formatGeneralError
+      "could not find foreign keys between these entities"
 
 addFiltersOrdersRanges :: ApiRequest -> Either ParseError (ReadRequest -> ReadRequest)
 addFiltersOrdersRanges apiRequest = foldr1 (liftA2 (.)) [

@@ -83,6 +83,14 @@ testCfgBinaryJWT :: Text -> AppConfig
 testCfgBinaryJWT testDbConn = (testCfg testDbConn) { configJwtSecret = Just secretBs }
   where secretBs = B64.decodeLenient "h2CGB1FoBd51aQooCS2g+UmRgYQfTPQ6v3+9ALbaqM4="
 
+setupDb :: Text -> IO ()
+setupDb dbConn = do
+  loadFixture dbConn "database"
+  loadFixture dbConn "roles"
+  loadFixture dbConn "schema"
+  loadFixture dbConn "jwt"
+  loadFixture dbConn "privileges"
+  resetDb dbConn
 
 resetDb :: Text -> IO ()
 resetDb dbConn = loadFixture dbConn "data"
